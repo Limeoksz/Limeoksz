@@ -544,22 +544,46 @@ class Twitch(object):
 
     # === CHANNEL POINTS / PREDICTION === #
     # Load the amount of current points for a channel, check if a bonus is available
-    def load_channel_points_context(self, streamer):
+def load_channel_points_context(self, streamer):
+    """
+    Carrega o contexto de Channel Points de um streamer.
+    Caso o streamer não exista ou haja erro de conexão, a função ignora o streamer
+    e retorna None para não travar o loop.
+    """
+    try:
+        # Prepara a requisição GraphQL
         json_data = copy.deepcopy(GQLOperations.ChannelPointsContext)
         json_data["variables"] = {"channelLogin": streamer.username}
 
+        # Faz a requisição
         response = self.post_gql_request(json_data)
+
+        # Verifica se o streamer existe
         if response != {}:
             if response["data"]["community"] is None:
                 raise StreamerDoesNotExistException
-            channel = response["data"]["community"]["channel"]
-            community_points = channel["self"]["communityPoints"]
-            streamer.channel_points = community_points["balance"]
-            streamer.activeMultipliers = community_points["activeMultipliers"]
+            return response  # Retorna os dados se existir
+        else:
+            self.logger.warning(f"Nenhuma resposta recebida para {streamer.username}.")
+            return None
 
-            if community_points["availableClaim"] is not None:
-                self.claim_bonus(
-                    streamer, community_points["availableClaim"]["id"])
+    except StreamerDoesNotExistException:
+        self.logger.warning(f"Streamer {streamer.username} não existe. Pulando...")
+        return None
+
+    except requests.exceptions.ConnectionError as e:
+        self.logger.error(
+            f"Erro de conexão ao carregar Channel Points de {streamer.username}: {e}",
+            exc_info=True
+        )
+        return None
+
+    except Exception as e:
+        self.logger.error(
+            f"Erro inesperado ao carregar Channel Points de {streamer.username}: {e}",
+            exc_info=True
+        )
+        return None
 
     def make_predictions(self, event):
         decision = event.bet.calculate(event.streamer.channel_points)
