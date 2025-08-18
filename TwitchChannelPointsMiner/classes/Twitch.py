@@ -544,46 +544,22 @@ class Twitch(object):
 
     # === CHANNEL POINTS / PREDICTION === #
     # Load the amount of current points for a channel, check if a bonus is available
-def load_channel_points_context(self, streamer):
-    """
-    Carrega o contexto de Channel Points de um streamer.
-    Caso o streamer não exista ou haja erro de conexão, a função ignora o streamer
-    e retorna None para não travar o loop.
-    """
-    try:
-        # Prepara a requisição GraphQL
+    def load_channel_points_context(self, streamer):
         json_data = copy.deepcopy(GQLOperations.ChannelPointsContext)
         json_data["variables"] = {"channelLogin": streamer.username}
 
-        # Faz a requisição
         response = self.post_gql_request(json_data)
-
-        # Verifica se o streamer existe
         if response != {}:
             if response["data"]["community"] is None:
                 raise StreamerDoesNotExistException
-            return response  # Retorna os dados se existir
-        else:
-            self.logger.warning(f"Nenhuma resposta recebida para {streamer.username}.")
-            return None
+            channel = response["data"]["community"]["channel"]
+            community_points = channel["self"]["communityPoints"]
+            streamer.channel_points = community_points["balance"]
+            streamer.activeMultipliers = community_points["activeMultipliers"]
 
-    except StreamerDoesNotExistException:
-        self.logger.warning(f"Streamer {streamer.username} não existe. Pulando...")
-        return None
-
-    except requests.exceptions.ConnectionError as e:
-        self.logger.error(
-            f"Erro de conexão ao carregar Channel Points de {streamer.username}: {e}",
-            exc_info=True
-        )
-        return None
-
-    except Exception as e:
-        self.logger.error(
-            f"Erro inesperado ao carregar Channel Points de {streamer.username}: {e}",
-            exc_info=True
-        )
-        return None
+            if community_points["availableClaim"] is not None:
+                self.claim_bonus(
+                    streamer, community_points["availableClaim"]["id"])
 
     def make_predictions(self, event):
         decision = event.bet.calculate(event.streamer.channel_points)
@@ -801,65 +777,77 @@ def load_channel_points_context(self, streamer):
         except (ValueError, KeyError):
             return False
 
-def claim_all_drops_from_inventory(self):
-    inventory = self.__get_inventory()
-    if inventory not in [None, {}]:
-        if inventory.get("dropCampaignsInProgress") not in [None, {}]:
-            for campaign in inventory["dropCampaignsInProgress"]:
-                for drop_dict in campaign["timeBasedDrops"]:
-                    drop = Drop(drop_dict)
-                    drop.update(drop_dict["self"])
-                    if drop.is_claimable:
-                        drop.is_claimed = self.claim_drop(drop)
-                        time.sleep(random.uniform(5, 10))
+    def claim_all_drops_from_inventory(self):
+        inventory = self.__get_inventory()
+        if inventory not in [None, {}]:
+            if inventory["dropCampaignsInProgress"] not in [None, {}]:
+                for campaign in inventory["dropCampaignsInProgress"]:
+                    for drop_dict in campaign["timeBasedDrops"]:
+                        drop = Drop(drop_dict)
+                        drop.update(drop_dict["self"])
+                        if drop.is_claimable is True:
+                            drop.is_claimed = self.claim_drop(drop)
+                            time.sleep(random.uniform(5, 10))
 
-def sync_campaigns(self, streamers, chunk_size=3):
-    campaigns_update = 0
-    while self.running:
-        try:
-            # Atualiza campanhas a cada 30 minutos
-            if campaigns_update == 0 or ((time.time() - campaigns_update) / 30) > 30:
-                campaigns_update = time.time()
+    def sync_campaigns(self, streamers, chunk_size=3):
+        campaigns_update = 0
+        while self.running:
+            try:
+                # Get update from dashboard each 60minutes
+                if (
+                    campaigns_update == 0
+                    # or ((time.time() - campaigns_update) / 60) > 60
 
-                # Corrige drops não reclamados
-                self.claim_all_drops_from_inventory()
+                    # TEMPORARY AUTO DROP CLAIMING FIX
+                    # 30 minutes instead of 60 minutes
+                    or ((time.time() - campaigns_update) / 30) > 30
+                    #####################################
+                ):
+                    campaigns_update = time.time()
 
-                # Busca campanhas ativas pelo dashboard
-                campaigns_details = self.__get_campaigns_details(
-                    self.__get_drops_dashboard(status="ACTIVE")
-                )
+                    # TEMPORARY AUTO DROP CLAIMING FIX
+                    self.claim_all_drops_from_inventory()
+                    #####################################
 
-                # Garante que sempre será uma lista
-                campaigns = campaigns_details if campaigns_details else []
-
-                if campaigns:
-                    campaigns = self.__sync_campaigns(campaigns)
-                else:
-                    self.logger.warning(
-                        "Nenhuma campanha ativa encontrada para sincronizar."
+                    # Get full details from current ACTIVE campaigns
+                    # Use dashboard so we can explore new drops not currently active in our Inventory
+                    campaigns_details = self.__get_campaigns_details(
+                        self.__get_drops_dashboard(status="ACTIVE")
                     )
+                    campaigns = []
 
-            # Check if user It's currently streaming the same game present in campaigns_details
-            for i in range(len(streamers)):
-                if streamers[i].drops_condition():
-                    # Filtra campanhas que o streamer está jogando e que estão ativas
-                    streamers[i].stream.campaigns = list(
-                        filter(
-                            lambda x: x.drops != []
-                            and x.game == streamers[i].stream.game
-                            and x.id in streamers[i].stream.campaigns_ids,
-                            campaigns,
+                    # Going to clear array and structure. Remove all the timeBasedDrops expired or not started yet
+                    for index in range(0, len(campaigns_details)):
+                        if campaigns_details[index] is not None:
+                            campaign = Campaign(campaigns_details[index])
+                            if campaign.dt_match is True:
+                                # Remove all the drops already claimed or with dt not matching
+                                campaign.clear_drops()
+                                if campaign.drops != []:
+                                    campaigns.append(campaign)
+                        else:
+                            continue
+
+                # Divide et impera :)
+                campaigns = self.__sync_campaigns(campaigns)
+
+                # Check if user It's currently streaming the same game present in campaigns_details
+                for i in range(0, len(streamers)):
+                    if streamers[i].drops_condition() is True:
+                        # yes! The streamer[i] have the drops_tags enabled and we It's currently stream a game with campaign active!
+                        # With 'campaigns_ids' we are also sure that this streamer have the campaign active.
+                        # yes! The streamer[index] have the drops_tags enabled and we It's currently stream a game with campaign active!
+                        streamers[i].stream.campaigns = list(
+                            filter(
+                                lambda x: x.drops != []
+                                and x.game == streamers[i].stream.game
+                                and x.id in streamers[i].stream.campaigns_ids,
+                                campaigns,
+                            )
                         )
-                    )
 
-            # Pausa para não travar o loop
-            time.sleep(5)
+            except (ValueError, KeyError, requests.exceptions.ConnectionError) as e:
+                logger.error(f"Error while syncing inventory: {e}")
+                self.__check_connection_handler(chunk_size)
 
-        except (ValueError, KeyError, requests.exceptions.ConnectionError) as e:
-            self.logger.error(f"Erro ao sincronizar inventário: {e}", exc_info=True)
-            self.__check_connection_handler(chunk_size)
-
-        except Exception as e:
-            self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
-
-        self.__chuncked_sleep(60, chunk_size=chunk_size)
+            self.__chuncked_sleep(60, chunk_size=chunk_size)
