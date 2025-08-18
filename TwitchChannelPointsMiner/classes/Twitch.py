@@ -822,9 +822,6 @@ class Twitch(object):
         except Exception as e:
             self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
 
-
-
-
                 # Divide et impera :)
                 campaigns = self.__sync_campaigns(campaigns)
 
