@@ -792,41 +792,43 @@ class Twitch(object):
     def sync_campaigns(self, streamers, chunk_size=3):
         campaigns_update = 0
         while self.running:
-            try:
-                # Get update from dashboard each 60minutes
-                if (
-                    campaigns_update == 0
-                    # or ((time.time() - campaigns_update) / 60) > 60
+        try:
+            # Atualiza campanhas a cada 30 minutos (antes era 60)
+            if (
+                campaigns_update == 0
+                or ((time.time() - campaigns_update) / 30) > 30
+            ):
+                campaigns_update = time.time()
 
-                    # TEMPORARY AUTO DROP CLAIMING FIX
-                    # 30 minutes instead of 60 minutes
-                    or ((time.time() - campaigns_update) / 30) > 30
-                    #####################################
-                ):
-                    campaigns_update = time.time()
+                # Corrige drops não reclamados
+                self.claim_all_drops_from_inventory()
 
-                    # TEMPORARY AUTO DROP CLAIMING FIX
-                    self.claim_all_drops_from_inventory()
-                    #####################################
+                # Busca campanhas ativas pelo dashboard
+                campaigns_details = self.__get_campaigns_details(
+                    self.__get_drops_dashboard(status="ACTIVE")
+                )
 
-                    # Get full details from current ACTIVE campaigns
-                    # Use dashboard so we can explore new drops not currently active in our Inventory
-                    campaigns_details = self.__get_campaigns_details(
-                        self.__get_drops_dashboard(status="ACTIVE")
-                    )
-                    campaigns = []
+                # Garante que sempre será uma lista
+                campaigns = campaigns_details if campaigns_details else []
 
-                    # Going to clear array and structure. Remove all the timeBasedDrops expired or not started yet
-                    for index in range(0, len(campaigns_details)):
-                        if campaigns_details[index] is not None:
-                            campaign = Campaign(campaigns_details[index])
-                            if campaign.dt_match is True:
-                                # Remove all the drops already claimed or with dt not matching
-                                campaign.clear_drops()
-                                if campaign.drops != []:
-                                    campaigns.append(campaign)
-                        else:
-                            continue
+                if campaigns:
+                    campaigns = self.__sync_campaigns(campaigns)
+                else:
+                    self.logger.warning("Nenhuma campanha ativa encontrada para sincronizar.")
+
+            # Pausa para evitar loop infinito sem espera
+            time.sleep(5)
+
+        except Exception as e:
+            self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
+
+            # Pode adicionar uma pausa para evitar sobrecarga do loop
+            time.sleep(5)
+
+        except Exception as e:
+            self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
+
+
 
                 # Divide et impera :)
                 campaigns = self.__sync_campaigns(campaigns)
