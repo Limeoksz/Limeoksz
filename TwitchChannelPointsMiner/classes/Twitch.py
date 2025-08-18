@@ -817,13 +817,13 @@ class Twitch(object):
                     self.logger.warning("Nenhuma campanha ativa encontrada para sincronizar.")
 
             # Pausa para evitar loop infinito sem espera
-            time.sleep(5)
+            time.sleep(20)
 
         except Exception as e:
             self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
 
             # Pode adicionar uma pausa para evitar sobrecarga do loop
-            time.sleep(5)
+            time.sleep(20)
 
         except Exception as e:
             self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
