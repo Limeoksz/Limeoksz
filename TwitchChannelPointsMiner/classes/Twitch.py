@@ -777,27 +777,24 @@ class Twitch(object):
         except (ValueError, KeyError):
             return False
 
-    def claim_all_drops_from_inventory(self):
-        inventory = self.__get_inventory()
-        if inventory not in [None, {}]:
-            if inventory["dropCampaignsInProgress"] not in [None, {}]:
-                for campaign in inventory["dropCampaignsInProgress"]:
-                    for drop_dict in campaign["timeBasedDrops"]:
-                        drop = Drop(drop_dict)
-                        drop.update(drop_dict["self"])
-                        if drop.is_claimable is True:
-                            drop.is_claimed = self.claim_drop(drop)
-                            time.sleep(random.uniform(5, 10))
+def claim_all_drops_from_inventory(self):
+    inventory = self.__get_inventory()
+    if inventory not in [None, {}]:
+        if inventory.get("dropCampaignsInProgress") not in [None, {}]:
+            for campaign in inventory["dropCampaignsInProgress"]:
+                for drop_dict in campaign["timeBasedDrops"]:
+                    drop = Drop(drop_dict)
+                    drop.update(drop_dict["self"])
+                    if drop.is_claimable:
+                        drop.is_claimed = self.claim_drop(drop)
+                        time.sleep(random.uniform(5, 10))
 
-    def sync_campaigns(self, streamers, chunk_size=3):
-        campaigns_update = 0
-        while self.running:
+def sync_campaigns(self, streamers, chunk_size=3):
+    campaigns_update = 0
+    while self.running:
         try:
             # Atualiza campanhas a cada 30 minutos
-            if (
-                campaigns_update == 0
-                or ((time.time() - campaigns_update) / 30) > 30
-            ):
+            if campaigns_update == 0 or ((time.time() - campaigns_update) / 30) > 30:
                 campaigns_update = time.time()
 
                 # Corrige drops não reclamados
@@ -814,34 +811,31 @@ class Twitch(object):
                 if campaigns:
                     campaigns = self.__sync_campaigns(campaigns)
                 else:
-                    self.logger.warning("Nenhuma campanha ativa encontrada para sincronizar.")
+                    self.logger.warning(
+                        "Nenhuma campanha ativa encontrada para sincronizar."
+                    )
+
+            # Check if user It's currently streaming the same game present in campaigns_details
+            for i in range(len(streamers)):
+                if streamers[i].drops_condition():
+                    # Filtra campanhas que o streamer está jogando e que estão ativas
+                    streamers[i].stream.campaigns = list(
+                        filter(
+                            lambda x: x.drops != []
+                            and x.game == streamers[i].stream.game
+                            and x.id in streamers[i].stream.campaigns_ids,
+                            campaigns,
+                        )
+                    )
 
             # Pausa para não travar o loop
             time.sleep(5)
 
+        except (ValueError, KeyError, requests.exceptions.ConnectionError) as e:
+            self.logger.error(f"Erro ao sincronizar inventário: {e}", exc_info=True)
+            self.__check_connection_handler(chunk_size)
+
         except Exception as e:
             self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
 
-                # Divide et impera :)
-                campaigns = self.__sync_campaigns(campaigns)
-
-                # Check if user It's currently streaming the same game present in campaigns_details
-                for i in range(0, len(streamers)):
-                    if streamers[i].drops_condition() is True:
-                        # yes! The streamer[i] have the drops_tags enabled and we It's currently stream a game with campaign active!
-                        # With 'campaigns_ids' we are also sure that this streamer have the campaign active.
-                        # yes! The streamer[index] have the drops_tags enabled and we It's currently stream a game with campaign active!
-                        streamers[i].stream.campaigns = list(
-                            filter(
-                                lambda x: x.drops != []
-                                and x.game == streamers[i].stream.game
-                                and x.id in streamers[i].stream.campaigns_ids,
-                                campaigns,
-                            )
-                        )
-
-            except (ValueError, KeyError, requests.exceptions.ConnectionError) as e:
-                logger.error(f"Error while syncing inventory: {e}")
-                self.__check_connection_handler(chunk_size)
-
-            self.__chuncked_sleep(60, chunk_size=chunk_size)
+        self.__chuncked_sleep(60, chunk_size=chunk_size)
