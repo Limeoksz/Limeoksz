@@ -793,7 +793,7 @@ class Twitch(object):
         campaigns_update = 0
         while self.running:
         try:
-            # Atualiza campanhas a cada 30 minutos (antes era 60)
+            # Atualiza campanhas a cada 30 minutos
             if (
                 campaigns_update == 0
                 or ((time.time() - campaigns_update) / 30) > 30
@@ -816,17 +816,12 @@ class Twitch(object):
                 else:
                     self.logger.warning("Nenhuma campanha ativa encontrada para sincronizar.")
 
-            # Pausa para evitar loop infinito sem espera
-            time.sleep(20)
+            # Pausa para não travar o loop
+            time.sleep(5)
 
         except Exception as e:
             self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
 
-            # Pode adicionar uma pausa para evitar sobrecarga do loop
-            time.sleep(20)
-
-        except Exception as e:
-            self.logger.error(f"Erro ao sincronizar campanhas: {e}", exc_info=True)
 
 
 
